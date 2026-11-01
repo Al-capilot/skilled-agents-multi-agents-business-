@@ -1,5 +1,5 @@
 import os
-import math
+import time
 import requests
 import imageio
 from crewai import Agent, Task, Crew, Process
@@ -25,9 +25,14 @@ except Exception:
 # ==========================================
 # 1. API AÇARLARI VƏ MÜHİT DƏYƏRLƏRİ
 # ==========================================
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "")
-os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY", "")
-os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "") or GEMINI_API_KEY
+
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+os.environ["SERPER_API_KEY"] = SERPER_API_KEY
+os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 VAPI_API_KEY = os.getenv("VAPI_API_KEY", "")
@@ -37,8 +42,11 @@ GMAIL_EMAIL = os.getenv("GMAIL_EMAIL", "")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 
 # Modellərin təyin edilməsi
-llm_openai = ChatOpenAI(model="gpt-4o", temperature=0.2)
-llm_gemini = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.2)
+llm_openai = ChatOpenAI(model="gpt-4o", temperature=0.2) if OPENAI_API_KEY else None
+llm_gemini = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0.2) if GOOGLE_API_KEY else None
+
+if llm_openai is None and llm_gemini is None:
+    raise RuntimeError("No AI API key detected. Set OPENAI_API_KEY or GEMINI_API_KEY in Render env vars.")
 
 # ==========================================
 # 2. XÜSUSİ ALƏTLƏR (TOOLS)
@@ -48,7 +56,10 @@ search_tool = SerperDevTool()
 @tool("WhatsApp Mesajı Göndər")
 def whatsapp_mesaj_gonder(telefon_nomresi: str, mesaj_metni: str):
     """WhatsApp vasitəsilə avtomatik mesaj göndərir."""
-    url = f"https://facebook.com{WHATSAPP_PHONE_ID}/messages"
+    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_ID:
+        return "WhatsApp konfiqurasiyası tamamlanmayıb. Render env dəyişənləri əlavə edin."
+
+    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": telefon_nomresi, "type": "text", "text": {"body": mesaj_metni}}
     try:
@@ -60,7 +71,10 @@ def whatsapp_mesaj_gonder(telefon_nomresi: str, mesaj_metni: str):
 @tool("Müştəriyə Zəng Et")
 def musteriye_zeng_et(telefon_nomresi: str, danisiq_metni: str):
     """Süni intellekt səsi ilə zəng edir."""
-    url = "https://vapi.ai"
+    if not VAPI_API_KEY:
+        return "VAPI API key mövcud deyil. Render env dəyişənlərini əlavə edin."
+
+    url = "https://api.vapi.ai/call"
     headers = {"Authorization": f"Bearer {VAPI_API_KEY}", "Content-Type": "application/json"}
     payload = {"phoneNumber": telefon_nomresi, "assistant": {"model": {"provider": "openai", "model": "gpt-4o"}, "firstMessage": danisiq_metni}}
     try:
@@ -72,14 +86,7 @@ def musteriye_zeng_et(telefon_nomresi: str, danisiq_metni: str):
 @tool("WordPress Paylaşımı")
 def wordpress_paylas(basliq: str, mezmun: str, status: str = "draft"):
     """Məqaləni WordPress saytına qaralama olaraq yükləyir."""
-    wp_url = "https://sizin-sayt.com"
-    auth = ("WP_ISTIFADECI_ADI", "WP_APPLICATION_PASSWORD")
-    payload = {"title": basliq, "content": mezmun, "status": status}
-    try:
-        response = requests.post(wp_url, json=payload, auth=auth, timeout=15)
-        return "Məqalə WordPress-ə qaralama olaraq əlavə edildi." if response.status_code == 201 else f"WP Xəta: {response.text}"
-    except Exception as e:
-        return f"WP Bağlantı xətası: {e}"
+    return "WordPress橋接 konfiqurasiyası hələ tamamlanmayıb. Bu tool-u aktiv etmək üçün WordPress URL və credentials əlavə edin."
 
 @tool("PDF Hesabat Yarat")
 def pdf_hesabat_arat(fayl_adi: str, basliq: str, metin_mezmunu: str):
@@ -98,6 +105,9 @@ def pdf_hesabat_arat(fayl_adi: str, basliq: str, metin_mezmunu: str):
 @tool("Email Göndər")
 def email_gonder(alici_email: str, movzu: str, mesaj_metni: str, pdf_yolu: str = None):
     """Mətn və PDF əlavə edərək e-poçt göndərir."""
+    if not GMAIL_EMAIL or not GMAIL_APP_PASSWORD:
+        return "Gmail credentials tapılmadı. Render env dəyişənlərini əlavə edin."
+
     msg = MIMEMultipart()
     msg['From'] = GMAIL_EMAIL
     msg['To'] = alici_email
@@ -109,7 +119,7 @@ def email_gonder(alici_email: str, movzu: str, mesaj_metni: str, pdf_yolu: str =
             pdf_attachment['Content-Disposition'] = f'attachment; filename="{os.path.basename(pdf_yolu)}"'
             msg.attach(pdf_attachment)
     try:
-        server = smtplib.SMTP('://gmail.com', 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_EMAIL, alici_email, msg.as_string())
@@ -127,7 +137,7 @@ analitik_agent = Agent(
     backstory='15 illik rəqəmsal marketinq və SEO təcrübəsinə malik baş analitikssən.',
     tools=[search_tool],
     verbose=True,
-    llm=llm_openai # Güclü analitika üçün GPT-4o
+    llm=llm_openai or llm_gemini
 )
 
 yazi_agenti = Agent(
@@ -136,7 +146,7 @@ yazi_agenti = Agent(
     backstory='Nüfuzlu maliyyə jurnallarında baş redaktor işləmisən. Uzun mətndə yaradıcısan.',
     tools=[wordpress_paylas, pdf_hesabat_arat],
     verbose=True,
-    llm=llm_gemini # Sizin şəkildə göndərdiyiniz Gemini modeli bura bağlandı (Uzun mətndə əladır)
+    llm=llm_gemini or llm_openai
 )
 
 kommunikasiya_agenti = Agent(
@@ -145,7 +155,7 @@ kommunikasiya_agenti = Agent(
     backstory='Müştəri təcrübəsi sahəsində 10 illik təcrübəsi olan peşəkar menecersən.',
     tools=[whatsapp_mesaj_gonder, musteriye_zeng_et, email_gonder],
     verbose=True,
-    llm=llm_openai
+    llm=llm_openai or llm_gemini
 )
 
 trend_tapshirigi = Task(
@@ -169,5 +179,13 @@ ai_sistemi = Crew(
 
 if __name__ == "__main__":
     print("Multi-Agent Sistemi Render üzərində başladılır...")
-    sonuc = ai_sistemi.kickoff()
-    print("Proses uğurla tamamlandı:", sonuc)
+    try:
+        sonuc = ai_sistemi.kickoff()
+        print("Proses uğurla tamamlandı:", sonuc)
+    except Exception as exc:
+        print(f"Agent sistemi xətası: {exc}")
+
+    if os.getenv("RENDER") == "true":
+        print("Render serveri işləyir. Proses hələ də canlı qalır...")
+        while True:
+            time.sleep(60)
