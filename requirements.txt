@@ -1,0 +1,8 @@
+crewai
+crewai-tools
+langchain-openai
+langchain-google-genai
+requests
+moviepy
+reportlab
+imageio
