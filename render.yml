@@ -1,16 +1,18 @@
 services:
-  - type: cron
+  - type: web
     name: crewai-multi-agent-system
     env: python
-    schedule: "0 9 * * *" # Hər gün avtomatik işə düşmə vaxtı
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
     envVars:
       - key: OPENAI_API_KEY
         sync: false
-      - key: SERPER_API_KEY
-        sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
         sync: false
       - key: ELEVENLABS_API_KEY
         sync: false
